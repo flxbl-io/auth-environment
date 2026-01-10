@@ -3,7 +3,7 @@ description: "Authenticate to a Salesforce environment using SFP Server with fal
 author: "flxbl-io"
 
 branding:
-  icon: "unlock"
+  icon: "anchor"
   color: "green"
 
 inputs:
