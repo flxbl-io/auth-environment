@@ -1,5 +1,5 @@
 name: "Authenticate to Environment"
-description: "Authenticate to a Salesforce environment using SFP Server with fallback to sandbox/scratch org login (without locking)"
+description: "Authenticate to a Salesforce environment using SFP Server"
 author: "flxbl-io"
 
 branding:
@@ -16,41 +16,19 @@ inputs:
     default: ${{ github.repository }}
   sfp-server-url:
     description: "URL to the SFP Server instance (e.g., https://your-org.flxbl.io)"
-    required: false
+    required: true
   sfp-server-token:
     description: "Token for SFP Server authentication"
-    required: false
-  env-auth-url:
-    description: "SFDX Auth URL for environment (native fallback)"
-    required: false
-  devhub-alias:
-    description: "Alias of authenticated DevHub for sandbox login fallback"
-    required: false
-    default: "devhub"
+    required: true
   alias:
-    description: "Alias for the authenticated environment org"
+    description: "Alias for the authenticated environment org (defaults to environment name)"
     required: false
     default: ""
 
 outputs:
   alias:
     description: "Alias used for the authenticated org"
-    value: ${{ steps.determine-output.outputs.alias }}
-  org-id:
-    description: "Org ID of the authenticated org"
-    value: ${{ steps.org-display.outputs.orgId }}
-  instance-url:
-    description: "Instance URL of the authenticated org"
-    value: ${{ steps.org-display.outputs.instanceUrl }}
-  username:
-    description: "Username of the authenticated org"
-    value: ${{ steps.org-display.outputs.username }}
-  access-token:
-    description: "Access token of the authenticated org"
-    value: ${{ steps.org-display.outputs.accessToken }}
-  auth-method:
-    description: "Authentication method used (sfp-server, server-sandbox, server-scratch, or native)"
-    value: ${{ steps.determine-output.outputs.auth_method }}
+    value: ${{ steps.auth.outputs.alias }}
 
 runs:
   using: "composite"
@@ -65,235 +43,29 @@ runs:
         echo "Action      : auth-environment"
         echo "Environment : ${{ inputs.environment }}"
         echo "Repository  : ${{ inputs.repository }}"
-        echo "SFP Server  : ${{ inputs.sfp-server-url || 'N/A (using native auth)' }}"
+        echo "SFP Server  : ${{ inputs.sfp-server-url }}"
         echo "------------------------------------------------------------------------------------------"
-        echo ""
 
-    - name: Determine alias
-      id: determine-alias
+    - name: Authenticate to Environment
+      id: auth
       shell: bash
+      env:
+        SFP_SERVER_URL: ${{ inputs.sfp-server-url }}
+        SFP_SERVER_TOKEN: ${{ inputs.sfp-server-token }}
       run: |
+        # Determine alias
         if [[ -n "${{ inputs.alias }}" ]]; then
-          echo "alias=${{ inputs.alias }}" >> $GITHUB_OUTPUT
+          TARGET_ALIAS="${{ inputs.alias }}"
         else
-          echo "alias=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          TARGET_ALIAS="${{ inputs.environment }}"
         fi
 
-    - name: Check authentication mode
-      id: check-env
-      shell: bash
-      env:
-        SFP_SERVER_URL: ${{ inputs.sfp-server-url }}
-        SFP_SERVER_TOKEN: ${{ inputs.sfp-server-token }}
-      run: |
-        if [[ -n "$SFP_SERVER_URL" && -n "$SFP_SERVER_TOKEN" ]]; then
-          echo "::notice::SFP Server credentials detected, will attempt server-based authentication"
-          echo "use_server=true" >> $GITHUB_OUTPUT
-        else
-          echo "::notice::SFP Server not configured, will use native authentication"
-          echo "use_server=false" >> $GITHUB_OUTPUT
-        fi
+        echo "Authenticating to environment '${{ inputs.environment }}' via SFP Server..."
 
-    - name: Authenticate using SFP Server
-      if: steps.check-env.outputs.use_server == 'true'
-      id: sfp-auth
-      shell: bash
-      env:
-        SFP_SERVER_URL: ${{ inputs.sfp-server-url }}
-        SFP_SERVER_TOKEN: ${{ inputs.sfp-server-token }}
-      run: |
-        echo "::notice::Attempting SFP Server authentication for '${{ inputs.environment }}'..."
-        TARGET_ALIAS="${{ steps.determine-alias.outputs.alias }}"
-
-        # Try to get environment details from SFP Server
-        env_info=$(sfp server environment get \
-          --name "${{ inputs.environment }}" \
+        sfp org login --server \
+          --environment "${{ inputs.environment }}" \
           --repository "${{ inputs.repository }}" \
-          --auth-type accessToken \
-          --json) || true
+          --alias "$TARGET_ALIAS"
 
-        # Check if the result indicates an error
-        error_name=$(echo "$env_info" | jq -r '.name // empty')
-        if [[ "$error_name" == "Error" ]]; then
-          error_message=$(echo "$env_info" | jq -r '.message // "Unknown error"')
-
-          # Environment not found - try fallback via server sandbox/scratch login
-          if [[ "$error_message" == *"not found"* ]]; then
-            echo "::notice::Environment not found in SFP Server, attempting server-based fallback..."
-
-            # Check if environment looks like a scratch org username (contains @)
-            if [[ "${{ inputs.environment }}" == *"@"* ]]; then
-              echo "::notice::Environment looks like a scratch org username, trying server scratch login..."
-
-              scratch_result=$(sfp server scratch login \
-                -u "${{ inputs.environment }}" \
-                -a "$TARGET_ALIAS" \
-                --json) || true
-
-              scratch_access_token=$(echo "$scratch_result" | jq -r '.accessToken // empty' 2>/dev/null)
-              if [[ -n "$scratch_access_token" ]]; then
-                echo "::notice::Successfully authenticated to scratch org via SFP Server"
-                echo "alias=$TARGET_ALIAS" >> $GITHUB_OUTPUT
-                echo "sfp_auth_used=true" >> $GITHUB_OUTPUT
-                echo "auth_method=server-scratch" >> $GITHUB_OUTPUT
-                exit 0
-              fi
-            fi
-
-            # Try server sandbox login
-            echo "::notice::Trying server sandbox login for '${{ inputs.environment }}'..."
-
-            sandbox_result=$(sfp server sandbox login \
-              -n "${{ inputs.environment }}" \
-              -a "$TARGET_ALIAS" \
-              --json) || true
-
-            sandbox_access_token=$(echo "$sandbox_result" | jq -r '.accessToken // empty' 2>/dev/null)
-            if [[ -n "$sandbox_access_token" ]]; then
-              echo "::notice::Successfully authenticated to sandbox via SFP Server"
-              echo "alias=$TARGET_ALIAS" >> $GITHUB_OUTPUT
-              echo "sfp_auth_used=true" >> $GITHUB_OUTPUT
-              echo "auth_method=server-sandbox" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-
-            # Server fallback failed, signal to use native auth
-            echo "::notice::Server-based authentication failed, will try native authentication"
-            echo "sfp_auth_used=false" >> $GITHUB_OUTPUT
-            echo "use_native=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Other error - signal to try native auth
-          echo "::warning::SFP Server error: $error_message. Will try native authentication."
-          echo "sfp_auth_used=false" >> $GITHUB_OUTPUT
-          echo "use_native=true" >> $GITHUB_OUTPUT
-          exit 0
-        fi
-
-        # SFP Server get succeeded - authenticate
-        echo "::notice::Successfully authenticated via SFP Server"
-        access_token=$(echo "$env_info" | jq -r '.accessToken')
-        instance_url=$(echo "$env_info" | jq -r '.instanceUrl')
-
-        sfp org login --access-token "$access_token" --instance-url "$instance_url" -a "$TARGET_ALIAS"
-
+        echo "::notice::Successfully authenticated to environment '${{ inputs.environment }}'"
         echo "alias=$TARGET_ALIAS" >> $GITHUB_OUTPUT
-        echo "sfp_auth_used=true" >> $GITHUB_OUTPUT
-        echo "auth_method=sfp-server" >> $GITHUB_OUTPUT
-
-    - name: Authenticate using native method
-      if: |
-        (steps.check-env.outputs.use_server == 'false' ||
-         steps.sfp-auth.outputs.use_native == 'true') &&
-        inputs.env-auth-url != ''
-      id: native-auth
-      shell: bash
-      run: |
-        echo "Authenticating to environment using native SFDX Auth URL..."
-        TARGET_ALIAS="${{ steps.determine-alias.outputs.alias }}"
-
-        echo "${{ inputs.env-auth-url }}" > ./authfile
-        sfp org login -f ./authfile -a "$TARGET_ALIAS"
-        rm -f ./authfile
-
-        echo "::notice::Successfully authenticated to environment via native method"
-        echo "alias=$TARGET_ALIAS" >> $GITHUB_OUTPUT
-        echo "native_auth_used=true" >> $GITHUB_OUTPUT
-        echo "auth_method=native" >> $GITHUB_OUTPUT
-
-    - name: Authenticate via DevHub sandbox login
-      if: |
-        (steps.check-env.outputs.use_server == 'false' ||
-         steps.sfp-auth.outputs.use_native == 'true') &&
-        inputs.env-auth-url == '' &&
-        inputs.devhub-alias != ''
-      id: devhub-sandbox-auth
-      shell: bash
-      run: |
-        echo "Authenticating to sandbox via DevHub..."
-        TARGET_ALIAS="${{ steps.determine-alias.outputs.alias }}"
-
-        # Check if environment looks like a scratch org username (contains @)
-        if [[ "${{ inputs.environment }}" == *"@"* ]]; then
-          echo "::error::Scratch org authentication requires SFP Server or env-auth-url"
-          exit 1
-        fi
-
-        sfp org login sandbox -n "${{ inputs.environment }}" -v "${{ inputs.devhub-alias }}" -a "$TARGET_ALIAS"
-
-        echo "::notice::Successfully authenticated to sandbox via DevHub"
-        echo "alias=$TARGET_ALIAS" >> $GITHUB_OUTPUT
-        echo "devhub_auth_used=true" >> $GITHUB_OUTPUT
-        echo "auth_method=native" >> $GITHUB_OUTPUT
-
-    - name: Validate authentication
-      shell: bash
-      run: |
-        if [[ "${{ steps.sfp-auth.outputs.sfp_auth_used }}" != "true" && \
-              "${{ steps.native-auth.outputs.native_auth_used }}" != "true" && \
-              "${{ steps.devhub-sandbox-auth.outputs.devhub_auth_used }}" != "true" ]]; then
-          echo "::error::No authentication method succeeded"
-          echo "Please ensure one of the following is available:"
-          echo "  1. SFP Server credentials (sfp-server-url and sfp-server-token)"
-          echo "  2. env-auth-url for native authentication"
-          echo "  3. Authenticated DevHub (devhub-alias) for sandbox login"
-          exit 1
-        fi
-
-    - name: Determine final outputs
-      id: determine-output
-      shell: bash
-      run: |
-        if [[ "${{ steps.sfp-auth.outputs.sfp_auth_used }}" == "true" ]]; then
-          echo "alias=${{ steps.sfp-auth.outputs.alias }}" >> $GITHUB_OUTPUT
-          echo "auth_method=${{ steps.sfp-auth.outputs.auth_method }}" >> $GITHUB_OUTPUT
-        elif [[ "${{ steps.native-auth.outputs.native_auth_used }}" == "true" ]]; then
-          echo "alias=${{ steps.native-auth.outputs.alias }}" >> $GITHUB_OUTPUT
-          echo "auth_method=${{ steps.native-auth.outputs.auth_method }}" >> $GITHUB_OUTPUT
-        elif [[ "${{ steps.devhub-sandbox-auth.outputs.devhub_auth_used }}" == "true" ]]; then
-          echo "alias=${{ steps.devhub-sandbox-auth.outputs.alias }}" >> $GITHUB_OUTPUT
-          echo "auth_method=${{ steps.devhub-sandbox-auth.outputs.auth_method }}" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Export org details
-      id: org-display
-      shell: bash
-      run: |
-        ALIAS="${{ steps.determine-output.outputs.alias }}"
-
-        if [[ -z "$ALIAS" ]]; then
-          echo "::warning::No authentication was performed, skipping org details export"
-          echo "alias=" >> "$GITHUB_OUTPUT"
-          echo "orgId=" >> "$GITHUB_OUTPUT"
-          echo "instanceUrl=" >> "$GITHUB_OUTPUT"
-          echo "username=" >> "$GITHUB_OUTPUT"
-          echo "accessToken=" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-
-        echo "Retrieving org details for alias: $ALIAS"
-        ORG_INFO=$(sf org display -o "$ALIAS" --json 2>/dev/null) || {
-          echo "::warning::Could not retrieve org details for alias: $ALIAS"
-          echo "alias=$ALIAS" >> "$GITHUB_OUTPUT"
-          echo "orgId=" >> "$GITHUB_OUTPUT"
-          echo "instanceUrl=" >> "$GITHUB_OUTPUT"
-          echo "username=" >> "$GITHUB_OUTPUT"
-          echo "accessToken=" >> "$GITHUB_OUTPUT"
-          exit 0
-        }
-
-        echo "alias=$ALIAS" >> "$GITHUB_OUTPUT"
-        echo "orgId=$(echo "$ORG_INFO" | jq -r '.result.id // empty')" >> "$GITHUB_OUTPUT"
-        echo "instanceUrl=$(echo "$ORG_INFO" | jq -r '.result.instanceUrl // empty')" >> "$GITHUB_OUTPUT"
-        echo "username=$(echo "$ORG_INFO" | jq -r '.result.username // empty')" >> "$GITHUB_OUTPUT"
-        echo "accessToken=$(echo "$ORG_INFO" | jq -r '.result.accessToken // empty')" >> "$GITHUB_OUTPUT"
-
-        echo ""
-        echo "------------------------------------------------------------------------------------------"
-        echo "Environment authenticated successfully:"
-        echo "  Alias    : $ALIAS"
-        echo "  Username : $(echo "$ORG_INFO" | jq -r '.result.username // empty')"
-        echo "  Org ID   : $(echo "$ORG_INFO" | jq -r '.result.id // empty')"
-        echo "  Instance : $(echo "$ORG_INFO" | jq -r '.result.instanceUrl // empty')"
-        echo "------------------------------------------------------------------------------------------"
