@@ -24,6 +24,10 @@ inputs:
     description: "Alias for the authenticated environment org (defaults to environment name)"
     required: false
     default: ""
+  auth-type:
+    description: "Type of authentication: 'accessToken' (recommended, short-lived) or 'sfdxAuthUrl' (long-lived refresh token)"
+    required: false
+    default: "accessToken"
 
 outputs:
   alias:
@@ -40,7 +44,7 @@ runs:
         echo "------------------------------------------------------------------------------------------"
         echo "flxbl-actions  -- ❤️  by flxbl.io ❤️  -Version:1.0.0"
         echo "------------------------------------------------------------------------------------------"
-        echo "Action      : auth-environment"
+        echo "Action     : auth-environment"
         echo "Environment : ${{ inputs.environment }}"
         echo "Repository  : ${{ inputs.repository }}"
         echo "SFP Server  : ${{ inputs.sfp-server-url }}"
@@ -62,10 +66,11 @@ runs:
 
         echo "Authenticating to environment '${{ inputs.environment }}' via SFP Server..."
 
-        sfp org login --server \
-          --environment "${{ inputs.environment }}" \
+        sfp server environment login \
+          --name "${{ inputs.environment }}" \
           --repository "${{ inputs.repository }}" \
-          --alias "$TARGET_ALIAS"
+          --alias "$TARGET_ALIAS" \
+          --auth-type "${{ inputs.auth-type }}"
 
         echo "::notice::Successfully authenticated to environment '${{ inputs.environment }}'"
         echo "alias=$TARGET_ALIAS" >> $GITHUB_OUTPUT

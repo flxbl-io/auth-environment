@@ -32,6 +32,7 @@ This action uses SFP Server to retrieve and authenticate to an environment that 
 | `sfp-server-token` | SFP Server application token | **Yes** | - |
 | `repository` | Repository name (`owner/repo` format) | No | Current repository |
 | `alias` | Custom alias for the authenticated org | No | Same as `environment` |
+| `auth-type` | Authentication type: `accessToken` (recommended) or `sfdxAuthUrl` | No | `accessToken` |
 
 ## Outputs
 
@@ -63,6 +64,23 @@ jobs:
 
       - name: Deploy
         run: sfp deploy -o ${{ steps.auth.outputs.alias }}
+```
+
+## Authentication Types
+
+The `auth-type` input controls how credentials are obtained:
+
+- **`accessToken`** (default, recommended): Uses short-lived access tokens. More secure as tokens expire quickly.
+- **`sfdxAuthUrl`**: Uses long-lived refresh tokens via SFDX Auth URL. Useful when you need persistent authentication.
+
+```yaml
+- name: Authenticate with sfdxAuthUrl
+  uses: flxbl-io/auth-environment@v1
+  with:
+    environment: 'dev'
+    sfp-server-url: ${{ secrets.SFP_SERVER_URL }}
+    sfp-server-token: ${{ secrets.SFP_SERVER_TOKEN }}
+    auth-type: 'sfdxAuthUrl'
 ```
 
 ## Difference from lock-environment
