@@ -24,11 +24,6 @@ inputs:
     description: "Alias for the authenticated environment org (defaults to environment name)"
     required: false
     default: ""
-  auth-type:
-    description: "Type of authentication: 'accessToken' (recommended, short-lived) or 'sfdxAuthUrl' (long-lived refresh token)"
-    required: false
-    default: ""
-
 outputs:
   alias:
     description: "Alias used for the authenticated org"
@@ -67,10 +62,6 @@ runs:
           TARGET_ALIAS="${{ inputs.alias }}"
         else
           TARGET_ALIAS="${{ inputs.environment }}"
-        fi
-
-        if [[ -n "${{ inputs.auth-type }}" ]]; then
-          CMD="$CMD --auth-type \"${{ inputs.auth-type }}\""
         fi
 
         eval $CMD
