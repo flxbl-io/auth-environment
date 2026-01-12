@@ -27,7 +27,7 @@ inputs:
   auth-type:
     description: "Type of authentication: 'accessToken' (recommended, short-lived) or 'sfdxAuthUrl' (long-lived refresh token)"
     required: false
-    default: "accessToken"
+    default: ""
 
 outputs:
   alias:
@@ -57,20 +57,23 @@ runs:
         SFP_SERVER_URL: ${{ inputs.sfp-server-url }}
         SFP_SERVER_TOKEN: ${{ inputs.sfp-server-token }}
       run: |
-        # Determine alias
+        echo "Authenticating to environment '${{ inputs.environment }}' via SFP Server..."
+
+        # Build command with optional flags
+        CMD="sfp server environment login --name \"${{ inputs.environment }}\" --repository \"${{ inputs.repository }}\""
+
         if [[ -n "${{ inputs.alias }}" ]]; then
+          CMD="$CMD --alias \"${{ inputs.alias }}\""
           TARGET_ALIAS="${{ inputs.alias }}"
         else
           TARGET_ALIAS="${{ inputs.environment }}"
         fi
 
-        echo "Authenticating to environment '${{ inputs.environment }}' via SFP Server..."
+        if [[ -n "${{ inputs.auth-type }}" ]]; then
+          CMD="$CMD --auth-type \"${{ inputs.auth-type }}\""
+        fi
 
-        sfp server environment login \
-          --name "${{ inputs.environment }}" \
-          --repository "${{ inputs.repository }}" \
-          --alias "$TARGET_ALIAS" \
-          --auth-type "${{ inputs.auth-type }}"
+        eval $CMD
 
         echo "::notice::Successfully authenticated to environment '${{ inputs.environment }}'"
         echo "alias=$TARGET_ALIAS" >> $GITHUB_OUTPUT
