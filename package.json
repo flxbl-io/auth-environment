@@ -1,6 +1,6 @@
 {
   "name": "@flxbl-io/auth-environment",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "GitHub Action to authenticate to a Salesforce environment via SFP Server (without locking)",
   "author": "flxbl-io",
   "license": "SEE LICENSE IN LICENSE",
