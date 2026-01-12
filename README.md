@@ -19,8 +19,8 @@ This action uses SFP Server to retrieve and authenticate to an environment that 
     sfp-server-url: ${{ secrets.SFP_SERVER_URL }}
     sfp-server-token: ${{ secrets.SFP_SERVER_TOKEN }}
 
-- name: Deploy to Environment
-  run: sfp deploy -o ${{ steps.auth-env.outputs.alias }}
+- name: Fetch Org Info
+  run: sf org display -o ${{ steps.auth-env.outputs.alias }}
 ```
 
 ## Inputs
@@ -39,30 +39,27 @@ This action uses SFP Server to retrieve and authenticate to an environment that 
 |--------|-------------|
 | `alias` | Alias used for the authenticated org |
 
-## Example: Deploy to Multiple Environments
+## Example: Query Data from Environment
 
 ```yaml
 jobs:
-  deploy:
+  query:
     runs-on: ubuntu-latest
     container: ghcr.io/flxbl-io/sfops:latest
-    strategy:
-      matrix:
-        environment: [dev, sit, uat]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to ${{ matrix.environment }}
+      - name: Authenticate to production
         id: auth
         uses: flxbl-io/auth-environment@v1
         with:
-          environment: ${{ matrix.environment }}
+          environment: 'production'
           sfp-server-url: ${{ secrets.SFP_SERVER_URL }}
           sfp-server-token: ${{ secrets.SFP_SERVER_TOKEN }}
 
-      - name: Deploy
-        run: sfp deploy -o ${{ steps.auth.outputs.alias }}
+      - name: Query records
+        run: sf data query -q "SELECT Id, Name FROM Account LIMIT 10" -o ${{ steps.auth.outputs.alias }}
 ```
 
 ## Difference from lock-environment
@@ -73,7 +70,7 @@ This action (`auth-environment`) only authenticates to an environment without ac
 - The environment is dedicated and doesn't need locking
 - You're running operations that don't require exclusive access
 
-For exclusive access with locking, use [lock-environment](https://github.com/flxbl-io/lock-environment) instead.
+**For installing packages or making changes to an environment, use [lock-environment](https://github.com/flxbl-io/lock-environment) instead** to ensure exclusive access.
 
 ## Prerequisites
 
